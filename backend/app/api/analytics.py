@@ -89,8 +89,18 @@ async def recommend_policies(
         )
 
     recommendations = generate_policy_recommendations(cves)
+
+    # Optional AI verification pass: when ANTHROPIC_API_KEY is configured and
+    # the caller asks for it, Claude reviews each recommendation, sharpens
+    # the justification, and may downgrade or drop incorrect mappings.
+    ai_validate = bool(body.get("ai_validate"))
+    model_used = "rules-only"
+    if ai_validate:
+        recommendations, model_used = await validate_with_ai(recommendations, cves)
+
     return {
         "total_cves_evaluated": len(cves),
+        "ai_model_used": model_used,
         "recommendations": [
             {
                 "policy_name": r.policy_name,

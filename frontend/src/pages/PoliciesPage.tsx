@@ -10,16 +10,20 @@ const PRIORITY_STYLES: Record<string, string> = {
   LOW: "bg-slate-100 text-slate-700 border-slate-200",
 };
 
+interface PolicyResponse {
+  total_cves_evaluated: number;
+  ai_model_used: string;
+  recommendations: PolicyRecommendation[];
+}
+
 export default function PoliciesPage() {
   const [severity, setSeverity] = useState<string>("");
   const [onlyKev, setOnlyKev] = useState<boolean>(false);
   const [vendor, setVendor] = useState("");
   const [search, setSearch] = useState("");
+  const [aiValidate, setAiValidate] = useState<boolean>(true);
   const [loading, setLoading] = useState(false);
-  const [data, setData] = useState<{
-    total_cves_evaluated: number;
-    recommendations: PolicyRecommendation[];
-  } | null>(null);
+  const [data, setData] = useState<PolicyResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const run = async () => {
@@ -31,8 +35,9 @@ export default function PoliciesPage() {
         only_kev: onlyKev,
         vendor: vendor || undefined,
         search: search || undefined,
+        ai_validate: aiValidate,
       });
-      setData(res);
+      setData(res as PolicyResponse);
     } catch (e: any) {
       setError(e?.response?.data?.detail || e?.message || "Failed to generate recommendations");
     } finally {
@@ -49,6 +54,7 @@ export default function PoliciesPage() {
           <p className="page-subtitle">
             Pick a CVE slice and we'll tell you which security policies need attention —
             with the exact keyword, CWE, or vendor signal that triggered each match.
+            Optional Claude verification re-grades each mapping for accuracy.
           </p>
         </div>
       </div>
@@ -86,7 +92,20 @@ export default function PoliciesPage() {
             </label>
           </div>
         </div>
-        <div className="mt-3 flex justify-end">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+          <label className="flex items-center gap-2 text-sm text-sentinel-ink">
+            <input
+              type="checkbox"
+              checked={aiValidate}
+              onChange={(e) => setAiValidate(e.target.checked)}
+            />
+            <span>
+              <span className="font-semibold">AI verification</span>{" "}
+              <span className="text-slate-500">
+                (Claude reviews each rule-based mapping for accuracy)
+              </span>
+            </span>
+          </label>
           <button onClick={run} disabled={loading} className="btn-gold">
             {loading ? "Analysing…" : "Get Policy Recommendations"}
           </button>
@@ -97,13 +116,19 @@ export default function PoliciesPage() {
 
       {data && (
         <>
-          <div className="panel-pad text-sm text-slate-500">
-            Evaluated{" "}
-            <span className="font-semibold text-sentinel-navyDark">
-              {data.total_cves_evaluated.toLocaleString()}
-            </span>{" "}
-            CVE{data.total_cves_evaluated === 1 ? "" : "s"} against {data.recommendations.length}{" "}
-            policy rule{data.recommendations.length === 1 ? "" : "s"}.
+          <div className="panel-pad flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500">
+            <span>
+              Evaluated{" "}
+              <span className="font-semibold text-sentinel-navyDark">
+                {data.total_cves_evaluated.toLocaleString()}
+              </span>{" "}
+              CVE{data.total_cves_evaluated === 1 ? "" : "s"} against{" "}
+              {data.recommendations.length} policy rule
+              {data.recommendations.length === 1 ? "" : "s"}.
+            </span>
+            <span className="rounded-full border border-sentinel-border bg-sentinel-subtle px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-sentinel-navyDark">
+              Verified by: {data.ai_model_used}
+            </span>
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">

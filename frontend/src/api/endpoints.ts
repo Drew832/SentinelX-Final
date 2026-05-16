@@ -255,10 +255,17 @@ export const policiesApi = {
       vendor?: string;
       cve_ids?: string[];
       limit?: number;
+      /**
+       * When true, the backend asks Claude to verify each rule-based
+       * recommendation, drop incorrect mappings, and refine the
+       * justification text with concrete CVE-level evidence.
+       */
+      ai_validate?: boolean;
     } = {},
   ) {
     const { data } = await apiClient.post<{
       total_cves_evaluated: number;
+      ai_model_used: string;
       recommendations: PolicyRecommendation[];
     }>("/policies/recommend", filters);
     return data;
