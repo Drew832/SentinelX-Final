@@ -1,4 +1,13 @@
-"""Executive and technical report API with PDF, Excel, and CSV export."""
+"""Executive and technical report API with PDF, Excel, and CSV export.
+
+Performance notes
+-----------------
+The executive endpoint accepts ``include_ai=false`` so the in-app live
+preview can render instantly with the deterministic narrative, then
+the user explicitly triggers the LLM-backed brief when they download
+the PDF. This avoids the 20–45 second hang the old endpoint exhibited
+when the dashboard re-fetched on every filter change.
+"""
 from __future__ import annotations
 
 import logging
@@ -45,7 +54,8 @@ def _resolve_window(start: date | None, end: date | None) -> tuple[date, date]:
 
 def _report_filename(report_type: str, end_date: date, fmt: str) -> str:
     """Generate standardized report filename."""
-    return f"SentinelIX_CVE_Report_{end_date.isoformat()}.{fmt}"
+    suffix = "Intelligence" if report_type == "executive" else "Technical"
+    return f"SentinelX_{suffix}_Report_{end_date.isoformat()}.{fmt}"
 
 
 @router.get("/executive")
@@ -53,12 +63,18 @@ async def executive_report(
     profile_id: int = Query(..., ge=1),
     start_date: date | None = Query(None),
     end_date: date | None = Query(None),
+    include_ai: bool = Query(
+        True,
+        description="When false, skip the LLM brief/recommendations and return the deterministic narrative immediately.",
+    ),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> dict:
     profile = await _get_profile(db, profile_id)
     start, end = _resolve_window(start_date, end_date)
-    report = await generate_executive_report(db, profile, start, end)
+    report = await generate_executive_report(
+        db, profile, start, end, include_ai=include_ai
+    )
     return strip_internal(report)
 
 
@@ -67,6 +83,7 @@ async def technical_report(
     profile_id: int = Query(..., ge=1),
     start_date: date | None = Query(None),
     end_date: date | None = Query(None),
+    include_ai: bool = Query(True),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> dict:
@@ -79,7 +96,9 @@ async def technical_report(
     """
     profile = await _get_profile(db, profile_id)
     start, end = _resolve_window(start_date, end_date)
-    report = await generate_technical_report(db, profile, start, end)
+    report = await generate_technical_report(
+        db, profile, start, end, include_ai=include_ai
+    )
     return strip_internal(report)
 
 
@@ -95,7 +114,7 @@ async def executive_report_export(
 ):
     profile = await _get_profile(db, profile_id)
     start, end = _resolve_window(start_date, end_date)
-    report = await generate_executive_report(db, profile, start, end)
+    report = await generate_executive_report(db, profile, start, end, include_ai=True)
     report["summary"]["generated_by"] = f"{user.username} <{user.email}>"
 
     payload, media_type, _ = export_report_bytes(report, format, "executive")
@@ -124,9 +143,9 @@ async def report_download(
     start, end = _resolve_window(start_date, end_date)
 
     if report_type == "technical":
-        report = await generate_technical_report(db, profile, start, end)
+        report = await generate_technical_report(db, profile, start, end, include_ai=True)
     else:
-        report = await generate_executive_report(db, profile, start, end)
+        report = await generate_executive_report(db, profile, start, end, include_ai=True)
 
     report["summary"]["generated_by"] = f"{user.username} <{user.email}>"
 
