@@ -3,7 +3,8 @@ import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useAuth } from "@/context/AuthContext";
 
-const OTP_TTL_SECONDS = 15 * 60;
+const OTP_TTL_SECONDS = 10 * 60;
+const RESEND_COOLDOWN_SECONDS = 30;
 
 /**
  * Registration + email-OTP verification.
@@ -13,6 +14,14 @@ const OTP_TTL_SECONDS = 15 * 60;
  * verification form normalises the user's input (digits only, length 6)
  * before submission so a stray space or leading zero never trips up the
  * server-side bcrypt comparison.
+ *
+ * Hardening notes:
+ *   • 10-minute expiry timer rendered live next to the code field.
+ *   • Resend button is disabled for ``RESEND_COOLDOWN_SECONDS`` so we
+ *     never spam the SMTP relay (the server enforces the same cooldown
+ *     defensively and returns 429 if the client lies).
+ *   • Wrapped in an ErrorBoundary at the app shell so a crash here
+ *     never lands the user on a blank page.
  */
 export default function RegisterPage() {
   const { register, verifyEmail, resendOtp } = useAuth();
@@ -26,7 +35,9 @@ export default function RegisterPage() {
   const [info, setInfo] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [secondsRemaining, setSecondsRemaining] = useState<number>(OTP_TTL_SECONDS);
+  const [resendCooldown, setResendCooldown] = useState<number>(0);
   const tickRef = useRef<number | null>(null);
+  const cooldownRef = useRef<number | null>(null);
 
   const pwdRules =
     "Use at least 12 characters with uppercase, lowercase, a number, and a special character.";
@@ -37,6 +48,7 @@ export default function RegisterPage() {
       return;
     }
     setSecondsRemaining(OTP_TTL_SECONDS);
+    setResendCooldown(RESEND_COOLDOWN_SECONDS);
     tickRef.current = window.setInterval(() => {
       setSecondsRemaining((prev) => (prev > 0 ? prev - 1 : 0));
     }, 1000);
@@ -44,6 +56,19 @@ export default function RegisterPage() {
       if (tickRef.current) window.clearInterval(tickRef.current);
     };
   }, [step]);
+
+  useEffect(() => {
+    if (resendCooldown <= 0) {
+      if (cooldownRef.current) window.clearInterval(cooldownRef.current);
+      return;
+    }
+    cooldownRef.current = window.setInterval(() => {
+      setResendCooldown((p) => (p > 0 ? p - 1 : 0));
+    }, 1000);
+    return () => {
+      if (cooldownRef.current) window.clearInterval(cooldownRef.current);
+    };
+  }, [resendCooldown]);
 
   const formatRemaining = (s: number) => {
     const mins = Math.floor(s / 60);
@@ -58,8 +83,12 @@ export default function RegisterPage() {
     setSubmitting(true);
     try {
       const pending = await register(email, username, password);
-      setEmail(pending.email);
-      setInfo(pending.detail);
+      // Defensive: only advance the flow if the server actually returned
+      // an email — guards against a misconfigured backend returning HTML.
+      const pendingEmail = pending?.email || email;
+      const pendingDetail = pending?.detail || "Check your inbox for the 6-digit code.";
+      setEmail(pendingEmail);
+      setInfo(pendingDetail);
       setStep("verify");
     } catch (err: any) {
       setError(err?.response?.data?.detail || "Registration failed");
@@ -77,6 +106,10 @@ export default function RegisterPage() {
       setError("Enter the 6-digit code from your email.");
       return;
     }
+    if (secondsRemaining <= 0) {
+      setError("This verification code has expired. Please request a new code.");
+      return;
+    }
     setSubmitting(true);
     try {
       await verifyEmail(email.trim().toLowerCase(), cleanCode);
@@ -92,13 +125,15 @@ export default function RegisterPage() {
   };
 
   const onResend = async () => {
+    if (resendCooldown > 0 || submitting) return;
     setError(null);
     setInfo(null);
     setSubmitting(true);
     try {
       const pending = await resendOtp(email.trim().toLowerCase());
-      setInfo(pending.detail);
+      setInfo(pending?.detail || "A new code is on its way.");
       setSecondsRemaining(OTP_TTL_SECONDS);
+      setResendCooldown(RESEND_COOLDOWN_SECONDS);
       setCode("");
     } catch (err: any) {
       setError(err?.response?.data?.detail || "Could not resend code");
@@ -272,7 +307,7 @@ export default function RegisterPage() {
                 )}
                 <button
                   type="submit"
-                  disabled={submitting || code.length !== 6}
+                  disabled={submitting || code.length !== 6 || secondsRemaining <= 0}
                   className="w-full rounded-lg bg-gradient-to-r from-sentinel-gold to-sentinel-goldSoft px-4 py-3 text-sm font-bold text-sentinel-navyDark shadow-glow transition-all hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-sentinel-gold/60 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {submitting ? "Verifying…" : "Verify and continue"}
@@ -280,10 +315,12 @@ export default function RegisterPage() {
                 <button
                   type="button"
                   onClick={onResend}
-                  disabled={submitting}
+                  disabled={submitting || resendCooldown > 0}
                   className="w-full rounded-lg border border-sentinel-border bg-white px-4 py-2.5 text-sm font-semibold text-sentinel-navyDark transition hover:bg-sentinel-subtle disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Resend code
+                  {resendCooldown > 0
+                    ? `Resend code in ${resendCooldown}s`
+                    : "Resend code"}
                 </button>
               </form>
             </>

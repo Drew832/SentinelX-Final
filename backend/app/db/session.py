@@ -36,6 +36,12 @@ def _ensure_user_columns_sqlite(sync_conn) -> None:
         sync_conn.execute(text("ALTER TABLE users ADD COLUMN otp_hashed VARCHAR(255)"))
     if "otp_expires_at" not in cols:
         sync_conn.execute(text("ALTER TABLE users ADD COLUMN otp_expires_at DATETIME"))
+    if "otp_attempts" not in cols:
+        sync_conn.execute(
+            text("ALTER TABLE users ADD COLUMN otp_attempts INTEGER DEFAULT 0 NOT NULL")
+        )
+    if "otp_last_sent_at" not in cols:
+        sync_conn.execute(text("ALTER TABLE users ADD COLUMN otp_last_sent_at DATETIME"))
 
 
 async def init_db() -> None:
