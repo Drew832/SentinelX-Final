@@ -1,0 +1,161 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+body {
+  @apply bg-sentinel-bg text-sentinel-ink;
+  font-family: "Inter", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ================= SentinelX components ================= */
+@layer components {
+  .panel {
+    @apply rounded-2xl border border-sentinel-border bg-sentinel-surface shadow-card;
+  }
+  .panel-pad {
+    @apply panel p-5;
+  }
+  .panel-dark {
+    @apply rounded-2xl border border-white/10 bg-sentinel-navy text-white shadow-card;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-sentinel-gold/60 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply btn bg-sentinel-navy text-white hover:bg-sentinel-navyDark;
+  }
+  .btn-gold {
+    @apply btn bg-sentinel-gold text-sentinel-navyDark hover:bg-sentinel-goldSoft shadow-glow;
+  }
+  .btn-secondary {
+    @apply btn border border-sentinel-border bg-white text-sentinel-ink hover:bg-sentinel-subtle;
+  }
+  .btn-danger {
+    @apply btn bg-sentinel-danger/90 text-white hover:bg-red-500;
+  }
+  .btn-dark {
+    @apply btn bg-sentinel-navyDark/70 text-white hover:bg-sentinel-navyDark;
+  }
+  .input {
+    @apply w-full rounded-lg border border-sentinel-border bg-white px-3 py-2 text-sm text-sentinel-ink placeholder:text-slate-400 focus:border-sentinel-navy focus:outline-none focus:ring-1 focus:ring-sentinel-navy/30;
+  }
+  .label {
+    @apply mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-500;
+  }
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider;
+  }
+  .badge-critical { @apply badge bg-red-500/15 text-red-600 border-red-500/40; }
+  .badge-high { @apply badge bg-orange-500/15 text-orange-600 border-orange-500/40; }
+  .badge-medium { @apply badge bg-yellow-500/20 text-yellow-700 border-yellow-500/40; }
+  .badge-low { @apply badge bg-emerald-500/15 text-emerald-700 border-emerald-500/40; }
+  .badge-kev {
+    @apply badge bg-red-500 text-white border-red-600 shadow-kev animate-glow;
+  }
+  .pill-gold {
+    @apply inline-block h-2.5 w-10 rounded-full bg-sentinel-gold;
+  }
+
+  /* Stat cards */
+  .stat-card {
+    @apply panel-dark flex flex-col justify-between px-6 py-5 min-h-[110px];
+  }
+  .stat-card__label {
+    @apply text-sm font-semibold text-sentinel-gold;
+  }
+  .stat-card__value {
+    @apply mt-2 text-4xl font-black text-white;
+  }
+
+  /* Analytics panels */
+  .analytics-card {
+    @apply panel-dark p-5 text-white;
+  }
+  .analytics-card h3 {
+    @apply text-sm font-semibold uppercase tracking-wider text-sentinel-gold;
+  }
+
+  /* Sidebar */
+  .side-section {
+    @apply mb-5;
+  }
+  .side-heading {
+    @apply mb-2 px-2 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500;
+  }
+  .side-item {
+    @apply flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-sentinel-subtle hover:text-sentinel-navyDark;
+  }
+  .side-item--active {
+    @apply bg-sentinel-navy text-white shadow-card hover:bg-sentinel-navyDark hover:text-white;
+  }
+}
+
+.page-heading {
+  @apply text-4xl font-black tracking-tight text-sentinel-navyDark;
+}
+.page-underline {
+  @apply mt-2 h-1.5 w-40 rounded-full bg-sentinel-navy;
+}
+.page-subtitle {
+  @apply mt-3 text-sm text-slate-500;
+}
+
+/* ================= Leaflet tweaks ================= */
+.leaflet-container {
+  background: #0b1220;
+}
+.leaflet-tile {
+  filter: brightness(0.55) saturate(0.7) hue-rotate(180deg);
+}
+
+/* Pulsing markers */
+.threat-marker {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  transform: translate(-50%, -50%);
+}
+.threat-marker__core {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  box-shadow: 0 0 12px currentColor;
+}
+.threat-marker__pulse {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: currentColor;
+  opacity: 0.6;
+  animation: radarPulse 2s ease-out infinite;
+}
+.threat-marker--kev .threat-marker__pulse {
+  animation: kevPulse 1.1s ease-out infinite;
+}
+@keyframes radarPulse {
+  0% { transform: scale(0.6); opacity: 0.85; }
+  100% { transform: scale(2.6); opacity: 0; }
+}
+@keyframes kevPulse {
+  0% { transform: scale(0.5); opacity: 1; }
+  100% { transform: scale(3.6); opacity: 0; }
+}
+
+/* Scrollbars */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(15, 29, 58, 0.2); border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(15, 29, 58, 0.35); }
