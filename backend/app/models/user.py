@@ -29,6 +29,11 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     otp_hashed: Mapped[str | None] = mapped_column(String(255), nullable=True)
     otp_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Bookkeeping for OTP throttling: count consecutive failed verify
+    # attempts and remember the last successful send so the resend
+    # endpoint can enforce a short cooldown.
+    otp_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    otp_last_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.utcnow(), nullable=False
     )

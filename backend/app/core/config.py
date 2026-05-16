@@ -16,13 +16,13 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    app_name: str = "SentinelIX"
+    app_name: str = "SentinelX"
     app_env: str = "development"
-    secret_key: str = "sentinelix-dev-secret-change-me"
+    secret_key: str = "sentinelx-dev-secret-change-me"
     access_token_expire_minutes: int = 60 * 24
     algorithm: str = "HS256"
 
-    database_url: str = "sqlite+aiosqlite:///./sentinelix.db"
+    database_url: str = "sqlite+aiosqlite:///./sentinelx.db"
 
     cors_origins: str | List[str] = Field(default_factory=lambda: ["http://localhost:5173"])
 
@@ -74,7 +74,7 @@ class Settings(BaseSettings):
             return [f.strip() for f in v.split(",") if f.strip()]
         return v
 
-    initial_admin_email: str = "admin@sentinelix.io"
+    initial_admin_email: str = "admin@sentinelx.io"
     initial_admin_password: str = "ChangeMe!2026"
     initial_admin_username: str = "admin"
 

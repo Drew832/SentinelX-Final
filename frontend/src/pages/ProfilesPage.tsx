@@ -13,6 +13,7 @@ import SeverityBadge from "@/components/cve/SeverityBadge";
 import KevBadge from "@/components/cve/KevBadge";
 import GenerateReportModal from "@/components/reports/GenerateReportModal";
 import { nvdCveUrl, riskColor, truncate } from "@/utils/format";
+import { toErrorMessage } from "@/utils/apiError";
 
 const ENVIRONMENTS: Environment[] = ["PROD", "DEV", "TEST"];
 
@@ -35,7 +36,7 @@ export default function ProfilesPage() {
       }
       setError(null);
     } catch (e: any) {
-      setError(e?.response?.data?.detail || e?.message || "Failed to load profiles");
+      setError(toErrorMessage(e, "Failed to load profiles"));
     } finally {
       setLoading(false);
     }
@@ -73,7 +74,7 @@ export default function ProfilesPage() {
       }
       setEditing(null);
     } catch (e: any) {
-      alert(e?.response?.data?.detail || "Save failed");
+      alert(toErrorMessage(e, "Save failed"));
     }
   };
 
@@ -107,7 +108,7 @@ export default function ProfilesPage() {
     } catch (e: any) {
       setActionMessage({
         kind: "error",
-        text: e?.response?.data?.detail || e?.message || "Rescore failed",
+        text: toErrorMessage(e, "Rescore failed"),
       });
     }
   };
@@ -115,7 +116,7 @@ export default function ProfilesPage() {
   const exportCsv = async (p: OrgProfile) => {
     setActionMessage(null);
     try {
-      const token = localStorage.getItem("sentinelix_token");
+      const token = localStorage.getItem("sentinelx_token");
       const resp = await fetch(profileApi.exportUrl(p.id), {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
@@ -133,7 +134,7 @@ export default function ProfilesPage() {
     } catch (e: any) {
       setActionMessage({
         kind: "error",
-        text: e?.response?.data?.detail || e?.message || "CSV export failed",
+        text: toErrorMessage(e, "CSV export failed"),
       });
     }
   };
@@ -354,7 +355,7 @@ function ProfileDetail({
       setPolicyResult(res);
     } catch (e: any) {
       setPolicyResult(null);
-      setPolicyErr(e?.response?.data?.detail || e?.message || "Could not generate recommendation");
+      setPolicyErr(toErrorMessage(e, "Could not generate recommendation"));
     } finally {
       setPolicyBusy(false);
     }

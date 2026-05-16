@@ -75,8 +75,16 @@ async def recommend_policies(
     """
     body = body or {}
 
+    # Cap the input set hard so the AI validation pass (which receives a
+    # compact JSON view of the contributing CVEs) always finishes within
+    # the gateway timeout, and so a wildcard query never spins for
+    # several minutes assembling thousands of rows.
+    requested_limit = int(body.get("limit") or 1500)
+    cve_limit = max(50, min(requested_limit, 1500))
+
     if body.get("cve_ids"):
-        stmt = select(CVE).where(CVE.cve_id.in_(body["cve_ids"]))
+        ids = list({c.upper() for c in body["cve_ids"]})[:cve_limit]
+        stmt = select(CVE).where(CVE.cve_id.in_(ids))
         cves = list((await db.execute(stmt)).scalars().all())
     else:
         cves = await _query_cves(
@@ -85,12 +93,24 @@ async def recommend_policies(
             only_kev=bool(body.get("only_kev")),
             search=body.get("search"),
             vendor=body.get("vendor"),
-            limit=int(body.get("limit") or 3000),
+            limit=cve_limit,
         )
 
     recommendations = generate_policy_recommendations(cves)
+
+    # Optional AI verification pass: when a provider is configured and
+    # the caller asks for it, the gateway runs Claude/OpenAI with
+    # built-in retry, timeout, and caching, then returns the refined
+    # mappings. The deterministic output is returned untouched if the
+    # LLM is unreachable, so this endpoint never blocks the UI for long.
+    ai_validate = bool(body.get("ai_validate"))
+    model_used = "rules-only"
+    if ai_validate:
+        recommendations, model_used = await validate_with_ai(recommendations, cves)
+
     return {
         "total_cves_evaluated": len(cves),
+        "ai_model_used": model_used,
         "recommendations": [
             {
                 "policy_name": r.policy_name,

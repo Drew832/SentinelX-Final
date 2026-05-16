@@ -16,7 +16,7 @@ BRAND_NAVY_LIGHT = "#1c3b7a"
 BRAND_GOLD = "#E0A82E"
 BRAND_BG = "#F5F6F8"
 
-OTP_EXPIRY_DISPLAY = "15 minutes"
+OTP_EXPIRY_DISPLAY = "10 minutes"
 
 
 def _build_otp_html(code: str, username: str) -> str:

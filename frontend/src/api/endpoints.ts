@@ -190,15 +190,49 @@ export const profileApi = {
 };
 
 export const reportsApi = {
-  async executive(profileId: number, startDate: string, endDate: string) {
+  /**
+   * Fetch an executive report.
+   *
+   * When ``includeAi`` is false the backend skips the LLM call and
+   * returns the deterministic narrative immediately, which keeps the
+   * live preview snappy on slow networks or when the AI provider is
+   * unreachable. The actual PDF download always asks for the AI brief.
+   */
+  async executive(
+    profileId: number,
+    startDate: string,
+    endDate: string,
+    opts: { includeAi?: boolean; signal?: AbortSignal } = {},
+  ) {
     const { data } = await apiClient.get<ExecutiveReport>("/reports/executive", {
-      params: { profile_id: profileId, start_date: startDate, end_date: endDate },
+      params: {
+        profile_id: profileId,
+        start_date: startDate,
+        end_date: endDate,
+        include_ai: opts.includeAi === undefined ? true : opts.includeAi,
+      },
+      signal: opts.signal,
+      // The AI brief alone can take ~30s; we give the request a slightly
+      // larger budget than the global default so the operator never has
+      // to deal with a misleading "Network Error" on a working call.
+      timeout: 90000,
     });
     return data;
   },
-  async technical(profileId: number, startDate: string, endDate: string) {
+  async technical(
+    profileId: number,
+    startDate: string,
+    endDate: string,
+    opts: { includeAi?: boolean } = {},
+  ) {
     const { data } = await apiClient.get<{ summary: any; cves: any[] }>("/reports/technical", {
-      params: { profile_id: profileId, start_date: startDate, end_date: endDate },
+      params: {
+        profile_id: profileId,
+        start_date: startDate,
+        end_date: endDate,
+        include_ai: opts.includeAi === undefined ? true : opts.includeAi,
+      },
+      timeout: 90000,
     });
     return data;
   },
@@ -255,12 +289,23 @@ export const policiesApi = {
       vendor?: string;
       cve_ids?: string[];
       limit?: number;
+      /**
+       * When true, the backend asks Claude to verify each rule-based
+       * recommendation, drop incorrect mappings, and refine the
+       * justification text with concrete CVE-level evidence.
+       */
+      ai_validate?: boolean;
     } = {},
   ) {
     const { data } = await apiClient.post<{
       total_cves_evaluated: number;
+      ai_model_used: string;
       recommendations: PolicyRecommendation[];
-    }>("/policies/recommend", filters);
+    }>("/policies/recommend", filters, {
+      // Policy generation + AI verification is the heaviest call in
+      // the platform; give it a longer ceiling than the default.
+      timeout: 90000,
+    });
     return data;
   },
 };

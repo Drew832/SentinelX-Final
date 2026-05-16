@@ -14,10 +14,7 @@ import KevPage from "@/pages/KevPage";
 import PoliciesPage from "@/pages/PoliciesPage";
 import CompliancePage from "@/pages/CompliancePage";
 import AssetHealthPage from "@/pages/AssetHealthPage";
-import AttackSurfacePage from "@/pages/AttackSurfacePage";
-import AccountPage from "@/pages/AccountPage";
 import ExecutiveReportPage from "@/pages/ExecutiveReportPage";
-import TechnicalReportPage from "@/pages/TechnicalReportPage";
 
 export default function App() {
   return (
@@ -37,7 +34,6 @@ export default function App() {
         <Route path="cves" element={<CveExplorerPage />} />
         <Route path="kev" element={<KevPage />} />
         <Route path="threat-map" element={<ThreatMapPage />} />
-        <Route path="attack-surface" element={<AttackSurfacePage />} />
         <Route path="asset-health" element={<AssetHealthPage />} />
         <Route path="compliance" element={<CompliancePage />} />
         <Route path="policies" element={<PoliciesPage />} />
@@ -59,14 +55,6 @@ export default function App() {
           }
         />
         <Route
-          path="account"
-          element={
-            <ProtectedRoute allowGuest={false}>
-              <AccountPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
           path="reports/executive/:id"
           element={
             <ProtectedRoute allowGuest={false}>
@@ -74,14 +62,11 @@ export default function App() {
             </ProtectedRoute>
           }
         />
-        <Route
-          path="reports/technical/:id"
-          element={
-            <ProtectedRoute allowGuest={false}>
-              <TechnicalReportPage />
-            </ProtectedRoute>
-          }
-        />
+        {/* Legacy redirect: technical reports were retired in favour of the
+            unified executive PDF. Old URLs land on the Reports hub. */}
+        <Route path="reports/technical/:id" element={<Navigate to="/reports" replace />} />
+        <Route path="account" element={<Navigate to="/dashboard" replace />} />
+        <Route path="attack-surface" element={<Navigate to="/threat-map" replace />} />
         <Route path="reports" element={<ReportsPage />} />
       </Route>
 

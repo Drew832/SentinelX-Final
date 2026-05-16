@@ -231,6 +231,8 @@ async def generate_executive_report(
     profile: OrgProfile,
     start_date: date,
     end_date: date,
+    *,
+    include_ai: bool = True,
 ) -> dict[str, Any]:
     rows = await _fetch_rows(db, profile, start_date, end_date)
 
@@ -334,21 +336,40 @@ async def generate_executive_report(
         + severity_counts.get("HIGH", 0),
     }
 
-    exec_brief, exec_recs, exec_model = await generate_report_narrative(
-        "executive",
-        {
-            "summary": summary,
-            "severity_breakdown": severity_counts,
-            "exposure": {
-                "exploited": exploited,
-                "non_exploited": len(rows) - exploited,
-                "internet_exposed_asset": profile.internet_exposed,
+    # Fast path: callers that want an instantaneous render (e.g. the
+    # in-app live preview) can opt out of the AI brief and fall back
+    # to the deterministic narrative builder. The downloadable PDF
+    # always asks for the AI brief.
+    if include_ai:
+        exec_brief, exec_recs, exec_model = await generate_report_narrative(
+            "executive",
+            {
+                "summary": summary,
+                "severity_breakdown": severity_counts,
+                "exposure": {
+                    "exploited": exploited,
+                    "non_exploited": len(rows) - exploited,
+                    "internet_exposed_asset": profile.internet_exposed,
+                },
+                "top_vendors": top_vendors,
+                "top_cves": top_cves,
+                "_rows": rows,
             },
-            "top_vendors": top_vendors,
-            "top_cves": top_cves,
-            "_rows": rows,
-        },
-    )
+        )
+    else:
+        from app.services.report_ai_service import _fallback as _local_fallback
+        exec_brief, exec_recs, exec_model = _local_fallback(
+            exec_mode=True,
+            ctx={
+                "summary": summary,
+                "severity_breakdown": severity_counts,
+                "exposure": {
+                    "exploited": exploited,
+                    "non_exploited": len(rows) - exploited,
+                    "internet_exposed_asset": profile.internet_exposed,
+                },
+            },
+        )
 
     summary["ai_model_used"] = exec_model
 
@@ -387,6 +408,8 @@ async def generate_technical_report(
     profile: OrgProfile,
     start_date: date,
     end_date: date,
+    *,
+    include_ai: bool = True,
 ) -> dict[str, Any]:
     """Technical report: full CVE table + metadata for engineering use."""
     rows = await _fetch_rows(db, profile, start_date, end_date)
@@ -441,26 +464,46 @@ async def generate_technical_report(
         }
     )
 
-    brief, recs, model = await generate_report_narrative(
-        "technical",
-        {
-            "summary": summary,
-            "severity_breakdown": {
-                "CRITICAL": summary["critical_count"],
-                "HIGH": summary["high_count"],
-                "MEDIUM": summary["medium_count"],
-                "LOW": summary["low_count"],
+    if include_ai:
+        brief, recs, model = await generate_report_narrative(
+            "technical",
+            {
+                "summary": summary,
+                "severity_breakdown": {
+                    "CRITICAL": summary["critical_count"],
+                    "HIGH": summary["high_count"],
+                    "MEDIUM": summary["medium_count"],
+                    "LOW": summary["low_count"],
+                },
+                "exposure": {
+                    "exploited": summary["exploited_count"],
+                    "non_exploited": len(rows) - summary["exploited_count"],
+                    "internet_exposed_asset": profile.internet_exposed,
+                },
+                "top_vendors": [],
+                "top_cves": full[:12],
+                "_rows": rows,
             },
-            "exposure": {
-                "exploited": summary["exploited_count"],
-                "non_exploited": len(rows) - summary["exploited_count"],
-                "internet_exposed_asset": profile.internet_exposed,
+        )
+    else:
+        from app.services.report_ai_service import _fallback as _local_fallback
+        brief, recs, model = _local_fallback(
+            exec_mode=False,
+            ctx={
+                "summary": summary,
+                "severity_breakdown": {
+                    "CRITICAL": summary["critical_count"],
+                    "HIGH": summary["high_count"],
+                    "MEDIUM": summary["medium_count"],
+                    "LOW": summary["low_count"],
+                },
+                "exposure": {
+                    "exploited": summary["exploited_count"],
+                    "non_exploited": len(rows) - summary["exploited_count"],
+                    "internet_exposed_asset": profile.internet_exposed,
+                },
             },
-            "top_vendors": [],
-            "top_cves": full[:12],
-            "_rows": rows,
-        },
-    )
+        )
     summary["ai_model_used"] = model
     return {"summary": summary, "cves": full, "brief": brief, "recommendations": recs, "_rows": rows}
 
@@ -680,7 +723,7 @@ def _exec_header_footer(canvas, doc, report_date: str):
     canvas.setFont("Helvetica", 7.5)
     canvas.setFillColor(navy)
     canvas.drawString(doc.leftMargin, h - 0.45 * inch,
-                      "SentinelIX \u2013 Intelligence Report")
+                      "SentinelX \u2013 Intelligence Report")
     canvas.setFillColor(subtle)
     canvas.drawRightString(w - doc.rightMargin, h - 0.45 * inch, report_date)
     canvas.setStrokeColor(gold)
@@ -866,7 +909,7 @@ def _report_pdf_bytes(report: dict[str, Any]) -> bytes:
     flow.append(gold_rule_wrapper)
     flow.append(Spacer(1, 22))
 
-    analyst = s.get("generated_by", "SentinelIX System")
+    analyst = s.get("generated_by", "SentinelX System")
     asset_display = s.get("asset_name") or "\u2014"
     meta_lines = (
         f"<b>Organization:</b> {s['profile_name']}<br/>"
@@ -1212,7 +1255,7 @@ def _tech_header_footer(canvas, doc, report_date: str):
     canvas.setFont("Helvetica", 7.5)
     canvas.setFillColor(navy)
     canvas.drawString(doc.leftMargin, h - 0.38 * inch,
-                      "SentinelIX \u2013 Technical Report")
+                      "SentinelX \u2013 Technical Report")
     canvas.setFillColor(subtle)
     canvas.drawRightString(w - doc.rightMargin, h - 0.38 * inch, report_date)
     canvas.setStrokeColor(gold)
@@ -1359,7 +1402,7 @@ def _technical_pdf_bytes(report: dict[str, Any]) -> bytes:
     flow.append(gold_rule_wrap)
     flow.append(Spacer(1, 18))
 
-    analyst = s.get("generated_by", "SentinelIX System")
+    analyst = s.get("generated_by", "SentinelX System")
     asset_display = s.get("asset_name") or "\u2014"
     meta_lines = (
         f"<b>Organization:</b> {s['profile_name']}<br/>"
@@ -1576,7 +1619,7 @@ def export_report_bytes(
     """Return (payload, media_type, filename) for the requested format/type."""
     fmt = (fmt or "csv").lower()
     stamp = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
-    base = f"SentinelIX_CVE_Report_{stamp}"
+    base = f"SentinelX_CVE_Report_{stamp}"
 
     is_technical = report_type == "technical"
     if fmt in {"xlsx", "excel"}:

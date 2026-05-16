@@ -1,16 +1,15 @@
-<<<<<<< HEAD
-# SentinelIX
+# SentinelX
 
-**SentinelIX** is a high-end Vulnerability Intelligence and Active Threat Hunting
-platform. It bridges the gap between raw vulnerability data and executive
-decision-making by correlating the National Vulnerability Database (NVD) with
-CISA's Known Exploited Vulnerabilities (KEV) catalog and live telemetry from
-Shodan.
+**SentinelX** is an enterprise Vulnerability Intelligence and Active Threat
+Hunting platform. It bridges the gap between raw vulnerability data and
+executive decision-making by correlating the National Vulnerability Database
+(NVD) with CISA's Known Exploited Vulnerabilities (KEV) catalog, EPSS
+probability scores, MITRE ATT&CK mappings, and live telemetry from Shodan.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  React + TypeScript + Tailwind  ←→  FastAPI (async) ←→ SQLite/Postgres   │
-│        Recharts · Leaflet · jsPDF       APScheduler · Shodan · LLM       │
+│      Recharts · Leaflet · jsPDF       APScheduler · Shodan · Claude      │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -24,9 +23,9 @@ Shodan.
   any matching CVE, stores KEV metadata (date added, vendor, vulnerability
   name, required action, due date, ransomware use), and stubs missing CVEs so
   the KEV-only filter never misses a freshly-added 0-day.
-- **JWT auth with bcrypt** — passwords hashed via `passlib[bcrypt]`, tokens
-  signed with `python-jose`. Admin / User / Guest roles drive the
-  `ProtectedRoute` UI behaviour.
+- **JWT auth with bcrypt + email OTP** — passwords hashed with bcrypt 4.x
+  directly (no passlib), tokens signed with `python-jose`, and accounts
+  activated only after a 6-digit one-time code is verified out of band.
 - **CVE Explorer** — search, severity filter, CVSS score range, Radix UI
   "CISA KEV Only" switch, KEV rows highlighted with a glowing weaponized
   badge, paginated, sortable.
@@ -35,13 +34,17 @@ Shodan.
 - **Real-time Threat Map** — React-Leaflet world map with custom CSS pulsing
   markers. KEV markers pulse faster and have a larger threat radius. Color
   scales with CVSS severity (red 9+, orange 7–8.9, yellow medium, green low).
-- **AI Security Assistant** — backend pulls relevant CVE context from the local
-  database (CVE-ID match, keyword search, KEV fallback) and proxies the prompt
-  to an OpenAI-compatible endpoint. Falls back to a deterministic local
-  summary when no key is configured.
-- **PDF Briefings** — jsPDF + jsPDF-AutoTable export a SentinelIX-branded
-  executive briefing including the composite Risk Score derived from the
-  severity donut.
+- **AI Security Assistant (Anthropic Claude)** — backend pulls relevant CVE
+  context from the local database (CVE-ID match, keyword search, KEV
+  fallback) and proxies the prompt to the Claude Messages API. Falls back to
+  a deterministic local summary when no API key is configured.
+- **AI-graded Policy Recommendations** — every CVE-to-policy mapping is
+  produced by Claude with an explicit `WHY_THIS_MAPS` justification block
+  citing CWE / KEV / exposure evidence, with a deterministic fallback when
+  the LLM is unavailable.
+- **PDF Briefings** — React-rendered jsPDF "Intelligence Report" with the
+  brand gradient header (purple → gold), navy body, severity cards, AI brief,
+  and recommendation sections.
 - **Sentinel theme** — Tailwind palette (`navy`, `slate`, `gold`) plus
   bespoke pulse / glow animations.
 
@@ -63,11 +66,12 @@ backend/
 frontend/
   src/
     api/         axios client + endpoint helpers
-    components/  layout, auth guard, CVE badges, ThreatMap
+    components/  layout, auth guard, CVE badges, ThreatMap, report template
     context/     AuthContext (JWT + Guest mode)
     pages/       Login, Register, Dashboard, CveExplorer, ThreatMap, Assistant, Reports
     styles/      Tailwind entrypoint and pulse keyframes
     types/       Strict TypeScript interfaces
+    utils/       jsPDF report generator, formatting helpers
   package.json
   vite.config.ts
   tailwind.config.js
@@ -86,7 +90,7 @@ uvicorn app.main:app --reload --port 8000
 
 On first boot the app:
 
-1. Creates SQLite tables (`./sentinelix.db` by default).
+1. Creates SQLite tables (`./sentinelx.db` by default).
 2. Bootstraps the initial admin from `INITIAL_ADMIN_*` env vars.
 3. Starts the APScheduler with two jobs:
    - `nvd_ingest` — `IntervalTrigger(minutes=10)`
@@ -123,28 +127,36 @@ See [`backend/.env.example`](backend/.env.example) for the full list. Notable:
 | `DATABASE_URL`                 | `sqlite+aiosqlite:///…` or `postgresql+asyncpg://…`        |
 | `NVD_API_KEY`                  | NIST NVD API key (recommended; lifts ingestion delay)      |
 | `SHODAN_API_KEY`               | Required for live telemetry (synthetic fallback otherwise) |
-| `OPENAI_API_KEY` / `_MODEL`    | AI assistant LLM (any OpenAI-compatible endpoint)          |
+| `ANTHROPIC_API_KEY` / `_MODEL` | Claude assistant + policy recommendations                  |
+| `SMTP_*`                       | SMTP relay for the email OTP code                          |
 | `INITIAL_ADMIN_*`              | Seeds the bootstrap admin on first run                     |
 
 ## API surface (`/api/v1`)
 
 | Method | Path                       | Description                                      |
 | ------ | -------------------------- | ------------------------------------------------ |
-| POST   | `/auth/register`           | Create user + return JWT                         |
-| POST   | `/auth/login`              | OAuth2 password grant → JWT                       |
+| POST   | `/auth/register`           | Create user, send OTP                            |
+| POST   | `/auth/verify-email`       | Activate account with OTP, return JWT            |
+| POST   | `/auth/resend-otp`         | Request a fresh OTP                              |
+| POST   | `/auth/login`              | OAuth2 password grant → JWT                      |
 | GET    | `/auth/me`                 | Current user                                     |
 | GET    | `/cves`                    | Paginated CVEs (filters: `only_kev`, severity…)  |
 | GET    | `/cves/stats`              | Severity / vendor / 14-day trend rollups         |
 | GET    | `/cves/{id}`               | Full CVE detail                                  |
 | GET    | `/telemetry`               | Geo-located threat points (Shodan, 24h cached)   |
-| POST   | `/ai/chat`                 | RAG over local CVE database (auth required)      |
+| POST   | `/ai/chat`                 | Claude RAG over local CVE database (auth)        |
+| POST   | `/policy-ai/recommend`     | Claude policy recommendation per profile CVE     |
+| GET    | `/reports/executive`       | Executive report JSON                            |
+| GET    | `/reports/download`        | Executive report XLSX/CSV/PDF                    |
 | POST   | `/admin/ingest/nvd`        | Force NVD ingest window (admin)                  |
 | POST   | `/admin/ingest/kev`        | Force CISA KEV refresh (admin)                   |
 
 ## Engineering checks
 
 - Bcrypt passwords: register a user and inspect `users.hashed_password` in the
-  DB — the value is a `$2b$12$…` hash, never plaintext.
+  DB — the value is a `$2b$12$…` hash, never plaintext. The same bcrypt hash
+  is used to store the verification OTP so codes are never stored in plain
+  text.
 - NIST timestamp formatting: `services/nvd_service.format_nvd_timestamp` emits
   `YYYY-MM-DDTHH:MM:SS.000+00:00` exactly as required by NVD API v2.
 - Rate limiting: `_request_delay()` returns 0.6s without an API key and 0.06s
@@ -158,6 +170,3 @@ See [`backend/.env.example`](backend/.env.example) for the full list. Notable:
 ## License
 
 Internal / demonstration use.
-=======
-# SentinelX
->>>>>>> 521a09a920c9506793cdef7700cf873938235f75

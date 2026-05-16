@@ -3,14 +3,31 @@
 Maps a collection of CVEs to the information-security policies an organisation
 should strengthen or adopt. Uses CWE identifiers, CVE description keywords, and
 affected product vendors as classification signals.
+
+Optional AI verification
+------------------------
+``validate_with_ai(recommendations, cves)`` is an optional second pass
+that asks Claude (or the OpenAI fallback) to review the deterministic
+classifier's output via :mod:`app.services.ai_gateway`. The model
+returns a refined justification for every recommendation that
+explicitly cites the contributing CVE evidence. When the LLM disagrees
+with the rule's mapping it can downgrade the priority or mark it
+incorrect, which we then drop. The deterministic output is always
+returned untouched if the validation pass fails for any reason — the
+engine is fail-safe, never fail-loud.
 """
 from __future__ import annotations
 
+import json
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Iterable
 
 from app.models.cve import CVE
+from app.services.ai_gateway import active_model, ai_complete, has_provider
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------
 # Rule definitions
@@ -400,3 +417,128 @@ def generate_policy_recommendations(cves: Iterable[CVE]) -> list[Recommendation]
     priority_rank = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
     results.sort(key=lambda r: (priority_rank[r.priority], -r.matched_cves))
     return results
+
+
+# ---------------------------------------------------------------
+# Optional AI verification layer
+# ---------------------------------------------------------------
+
+
+_AI_SYSTEM = (
+    "You are SentinelX Policy Auditor, a senior security GRC analyst. You will "
+    "be given a list of policy recommendations produced by a deterministic "
+    "classifier alongside the contributing CVE evidence. For EACH "
+    "recommendation, decide whether the mapping is accurate. Return STRICT "
+    "JSON: {\"reviews\": [{\"policy_name\": str, \"verdict\": \"confirmed\" | "
+    "\"weak\" | \"incorrect\", \"priority\": \"HIGH\" | \"MEDIUM\" | \"LOW\", "
+    "\"justification\": str}]}. "
+    "The justification MUST cite at least one concrete CVE-ID and the specific "
+    "weakness or exposure that motivated the policy mapping. Keep each "
+    "justification under 60 words. Never include markdown."
+)
+
+
+def _ai_payload(
+    recommendations: list[Recommendation],
+    cve_index: dict[str, CVE],
+) -> dict:
+    """Build the compact JSON payload the auditor model sees.
+
+    We trim every text field aggressively so the prompt fits in a single
+    Claude turn even for large recommendation sets — that's what keeps
+    the /policies/recommend endpoint snappy when `ai_validate=true`.
+    """
+    payload: list[dict] = []
+    for rec in recommendations:
+        evidence_blob: list[dict] = []
+        for ev in rec.evidence[:5]:
+            cve = cve_index.get(ev.cve_id)
+            if not cve:
+                continue
+            evidence_blob.append({
+                "cve_id": cve.cve_id,
+                "cvss": cve.cvss_v3_score,
+                "severity": cve.cvss_v3_severity,
+                "is_kev": bool(cve.is_kev),
+                "cwe_ids": (cve.cwe_ids or [])[:5],
+                "vendors": (cve.vendors or [])[:5],
+                "description": (cve.description or "")[:280],
+                "matched_terms": ev.matched_terms[:5],
+                "match_type": ev.match_type,
+            })
+        payload.append({
+            "policy_name": rec.policy_name,
+            "engine_priority": rec.priority,
+            "matched_cves": rec.matched_cves,
+            "matched_terms": rec.matched_terms[:8],
+            "evidence": evidence_blob,
+        })
+    return {"recommendations": payload}
+
+
+async def validate_with_ai(
+    recommendations: list[Recommendation],
+    cves: Iterable[CVE],
+) -> tuple[list[Recommendation], str]:
+    """Have Claude verify the deterministic mapping and refine justifications.
+
+    Returns the (possibly reordered) list of Recommendations plus a marker
+    string indicating which model was used so callers can surface it in
+    the UI for transparency. The deterministic output is returned
+    untouched if no LLM is configured or the API call fails — this
+    routine is fail-safe by design and never raises.
+    """
+    if not recommendations:
+        return recommendations, "none"
+    if not has_provider():
+        return recommendations, "rules-only"
+
+    cve_index: dict[str, CVE] = {c.cve_id: c for c in cves}
+    payload = _ai_payload(recommendations, cve_index)
+
+    result = await ai_complete(
+        system=_AI_SYSTEM,
+        user=json.dumps(payload),
+        max_tokens=1500,
+        temperature=0.2,
+        timeout=30.0,
+        cache_ttl=240,
+        label="policy_validate",
+    )
+    if not result.ok:
+        logger.info("Policy AI validation unavailable (%s); using rules", result.error)
+        return recommendations, "rules-only"
+
+    try:
+        parsed = json.loads(result.text)
+        reviews = parsed.get("reviews") or []
+    except (json.JSONDecodeError, AttributeError) as exc:
+        logger.warning("Policy AI validation parse failed (%s); using rules", exc)
+        return recommendations, "rules-only"
+
+    by_name = {
+        r["policy_name"]: r
+        for r in reviews
+        if isinstance(r, dict) and r.get("policy_name")
+    }
+    refined: list[Recommendation] = []
+    for rec in recommendations:
+        review = by_name.get(rec.policy_name)
+        if not review:
+            refined.append(rec)
+            continue
+        verdict = (review.get("verdict") or "").lower()
+        if verdict == "incorrect":
+            # Drop the recommendation entirely when the LLM says it's wrong.
+            continue
+        new_priority = (review.get("priority") or rec.priority).upper()
+        if new_priority not in {"HIGH", "MEDIUM", "LOW"}:
+            new_priority = rec.priority
+        new_just = (review.get("justification") or "").strip() or rec.justification
+        rec.priority = new_priority
+        rec.justification = new_just
+        refined.append(rec)
+
+    priority_rank = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
+    refined.sort(key=lambda r: (priority_rank[r.priority], -r.matched_cves))
+    return refined, active_model()
