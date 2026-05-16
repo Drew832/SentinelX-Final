@@ -5,6 +5,7 @@ import clsx from "clsx";
 import { profileApi, reportsApi } from "@/api/endpoints";
 import type { OrgProfile } from "@/types";
 import { generateSentinelXReport } from "@/utils/generateReport";
+import { toErrorMessage } from "@/utils/apiError";
 
 type Format = "pdf" | "xlsx" | "csv";
 
@@ -38,7 +39,7 @@ export default function GenerateReportModal({ onClose }: { onClose: () => void }
         if (list.length) setProfileId(list[0].id);
       })
       .catch((e) =>
-        setError(e?.response?.data?.detail || "Failed to load profiles. Sign in first."),
+        setError(toErrorMessage(e, "Failed to load profiles. Sign in first.")),
       )
       .finally(() => setLoading(false));
   }, []);

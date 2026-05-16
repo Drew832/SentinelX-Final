@@ -15,6 +15,7 @@ import { profileApi, reportsApi } from "@/api/endpoints";
 import type { ExecutiveReport, OrgProfile } from "@/types";
 import { SEVERITY_COLORS, formatDate } from "@/utils/format";
 import { generateSentinelXReport } from "@/utils/generateReport";
+import { toErrorMessage } from "@/utils/apiError";
 
 function isoDay(d: Date) {
   return d.toISOString().slice(0, 10);
@@ -57,7 +58,7 @@ export default function ReportsPage() {
         if (!profileId && list.length) setProfileId(list[0].id);
       })
       .catch((e) =>
-        setError(e?.response?.data?.detail || "Failed to load profiles — sign in required."),
+        setError(toErrorMessage(e, "Failed to load profiles — sign in required.")),
       );
   }, []);
 
@@ -69,7 +70,7 @@ export default function ReportsPage() {
       const data = await reportsApi.executive(profileId, start, end, { includeAi: false });
       setReport(data);
     } catch (e: any) {
-      setError(e?.response?.data?.detail || e?.message || "Report failed");
+      setError(toErrorMessage(e, "Report failed"));
     } finally {
       setLoading(false);
     }
@@ -88,9 +89,10 @@ export default function ReportsPage() {
       setReport(data);
     } catch (e: any) {
       setError(
-        e?.response?.data?.detail ||
-          e?.message ||
+        toErrorMessage(
+          e,
           "AI brief unavailable — showing deterministic narrative.",
+        ),
       );
     } finally {
       setAiUpgrading(false);
@@ -177,7 +179,7 @@ export default function ReportsPage() {
       });
       setReport(data);
     } catch (e: any) {
-      setError(e?.response?.data?.detail || e?.message || "PDF generation failed");
+      setError(toErrorMessage(e, "PDF generation failed"));
     } finally {
       setExporting(null);
     }

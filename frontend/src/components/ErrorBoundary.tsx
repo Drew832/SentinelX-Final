@@ -29,6 +29,23 @@ interface State {
  * tokens beyond inline style — if the CSS pipeline itself crashed, we
  * still want a usable error screen.
  */
+/**
+ * Coerce anything thrown into a render-safe string. Errors thrown
+ * from React render functions occasionally carry non-Error payloads
+ * (axios responses, validation arrays); we never want THAT crash to
+ * crash the fallback itself.
+ */
+function safeErrorMessage(error: unknown): string {
+  if (!error) return "Unknown error";
+  if (typeof error === "string") return error;
+  if (error instanceof Error) return error.message || error.name || "Error";
+  try {
+    return JSON.stringify(error, null, 2);
+  } catch {
+    return String(error);
+  }
+}
+
 export default class ErrorBoundary extends Component<Props, State> {
   state: State = { hasError: false, error: null };
 
@@ -131,7 +148,7 @@ export default class ErrorBoundary extends Component<Props, State> {
             or reloading the workspace.
           </p>
 
-          {this.state.error?.message && (
+          {this.state.error && (
             <pre
               style={{
                 background: "rgba(0,0,0,0.35)",
@@ -147,7 +164,7 @@ export default class ErrorBoundary extends Component<Props, State> {
                 overflow: "auto",
               }}
             >
-              {this.state.error.message}
+              {safeErrorMessage(this.state.error)}
             </pre>
           )}
 

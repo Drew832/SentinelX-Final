@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useAuth } from "@/context/AuthContext";
+import { toErrorMessage } from "@/utils/apiError";
 
 /**
  * Login screen.
@@ -31,7 +32,7 @@ export default function LoginPage() {
       await login(username, password);
       navigate(from, { replace: true });
     } catch (err: any) {
-      setError(err?.response?.data?.detail || "Login failed");
+      setError(toErrorMessage(err, "Login failed"));
     } finally {
       setSubmitting(false);
     }

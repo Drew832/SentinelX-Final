@@ -1,6 +1,7 @@
 import { useState } from "react";
 import clsx from "clsx";
 import { policiesApi, type PolicyRecommendation } from "@/api/endpoints";
+import { toErrorMessage } from "@/utils/apiError";
 
 const SEVERITIES = ["", "CRITICAL", "HIGH", "MEDIUM", "LOW"] as const;
 
@@ -39,7 +40,7 @@ export default function PoliciesPage() {
       });
       setData(res as PolicyResponse);
     } catch (e: any) {
-      setError(e?.response?.data?.detail || e?.message || "Failed to generate recommendations");
+      setError(toErrorMessage(e, "Failed to generate recommendations"));
     } finally {
       setLoading(false);
     }

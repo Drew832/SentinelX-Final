@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useAuth } from "@/context/AuthContext";
+import { toErrorMessage } from "@/utils/apiError";
 
 const OTP_TTL_SECONDS = 10 * 60;
 const RESEND_COOLDOWN_SECONDS = 30;
@@ -91,7 +92,7 @@ export default function RegisterPage() {
       setInfo(pendingDetail);
       setStep("verify");
     } catch (err: any) {
-      setError(err?.response?.data?.detail || "Registration failed");
+      setError(toErrorMessage(err, "Registration failed"));
     } finally {
       setSubmitting(false);
     }
@@ -115,10 +116,7 @@ export default function RegisterPage() {
       await verifyEmail(email.trim().toLowerCase(), cleanCode);
       window.location.href = "/dashboard";
     } catch (err: any) {
-      setError(
-        err?.response?.data?.detail ||
-          "Verification failed. Double-check the code or request a new one.",
-      );
+      setError(toErrorMessage(err, "Verification failed. Double-check the code or request a new one."));
     } finally {
       setSubmitting(false);
     }
@@ -136,7 +134,7 @@ export default function RegisterPage() {
       setResendCooldown(RESEND_COOLDOWN_SECONDS);
       setCode("");
     } catch (err: any) {
-      setError(err?.response?.data?.detail || "Could not resend code");
+      setError(toErrorMessage(err, "Could not resend code"));
     } finally {
       setSubmitting(false);
     }

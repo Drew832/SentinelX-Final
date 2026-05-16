@@ -5,8 +5,10 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
 from app.api.router import api_router
@@ -110,6 +112,36 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.exception_handler(RequestValidationError)
+async def _validation_exception_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """Return a render-safe validation error payload.
+
+    FastAPI's default 422 body is ``{"detail": [{type, loc, msg, ...}, ...]}``
+    which is technically correct but blew up the React console any time a
+    consumer rendered ``response.data.detail`` straight into JSX. We
+    collapse the issue list into a single human-readable string under
+    ``detail`` (so existing call sites keep working) and keep the
+    structured array under ``errors`` for clients that genuinely want it.
+    """
+    errors = exc.errors()
+    summary_parts: list[str] = []
+    for err in errors:
+        loc = err.get("loc") or []
+        # Drop the noisy "body"/"query"/... prefix.
+        cleaned = [str(p) for i, p in enumerate(loc)
+                   if not (i == 0 and p in {"body", "query", "path", "header", "cookie"})]
+        field = ".".join(cleaned) if cleaned else ""
+        msg = str(err.get("msg") or "Invalid value")
+        summary_parts.append(f"{field}: {msg}" if field else msg)
+    summary = "; ".join(summary_parts) or "Validation failed."
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={"detail": summary, "errors": errors},
+    )
+
 
 app.include_router(api_router)
 

@@ -7,6 +7,7 @@ import RiskBreakdown from "@/components/reports/template/RiskBreakdown";
 import ReportSection from "@/components/reports/template/ReportSection";
 import ReportFrame from "@/components/reports/template/ReportFrame";
 import { nvdCveUrl } from "@/utils/format";
+import { toErrorMessage } from "@/utils/apiError";
 
 export default function ExecutiveReportPage() {
   const { id } = useParams();
@@ -25,7 +26,7 @@ export default function ExecutiveReportPage() {
         setData(r as any);
         setError(null);
       })
-      .catch((e: any) => setError(e?.response?.data?.detail || e?.message || "Failed to load report"));
+      .catch((e: any) => setError(toErrorMessage(e, "Failed to load report")));
   }, [profileId, start, end]);
 
   const cards = useMemo(() => {

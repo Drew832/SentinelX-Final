@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { newsApi } from "@/api/endpoints";
 import type { NewsArticle, NewsListResponse } from "@/types";
 import { timeAgo } from "@/utils/format";
+import { toErrorMessage } from "@/utils/apiError";
 
 type SortMode = "latest" | "category";
 
@@ -70,7 +71,7 @@ export default function NewsFeedPage() {
       await newsApi.refresh();
       await load({ silent: true });
     } catch (e: any) {
-      setError(e?.response?.data?.detail || e?.message || "Refresh failed");
+      setError(toErrorMessage(e, "Refresh failed"));
     } finally {
       setRefreshing(false);
     }
