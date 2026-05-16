@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 
 declare module "jspdf";
+declare module "jspdf-autotable";
 
 interface ImportMetaEnv {
   readonly VITE_API_BASE_URL?: string;

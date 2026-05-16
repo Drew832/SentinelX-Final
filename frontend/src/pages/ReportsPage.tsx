@@ -14,11 +14,21 @@ import {
 import { profileApi, reportsApi } from "@/api/endpoints";
 import type { ExecutiveReport, OrgProfile } from "@/types";
 import { SEVERITY_COLORS, formatDate } from "@/utils/format";
+import { generateSentinelXReport } from "@/utils/generateReport";
 
 function isoDay(d: Date) {
   return d.toISOString().slice(0, 10);
 }
 
+/**
+ * Reports hub.
+ *
+ * Only the executive report is exposed — the technical PDF was retired in
+ * the v3 cleanup. CSV / Excel exports still hit the backend, but the PDF
+ * route now uses the React-rendered, brand-strict jsPDF generator in
+ * `utils/generateReport.ts` so the downloadable PDF exactly matches the
+ * approved SentinelX template.
+ */
 export default function ReportsPage() {
   const [params, setParams] = useSearchParams();
   const [profiles, setProfiles] = useState<OrgProfile[]>([]);
@@ -69,10 +79,9 @@ export default function ReportsPage() {
     setParams(next, { replace: true });
   };
 
-  const [reportType, setReportType] = useState<"executive" | "technical">("executive");
   const [exporting, setExporting] = useState<string | null>(null);
 
-  const download = async (fmt: "pdf" | "xlsx" | "csv") => {
+  const downloadServerExport = async (fmt: "xlsx" | "csv") => {
     if (!profileId) return;
     setExporting(fmt);
     try {
@@ -80,10 +89,10 @@ export default function ReportsPage() {
         profile_id: profileId,
         start_date: start,
         end_date: end,
-        report_type: reportType,
+        report_type: "executive",
         format: fmt,
       });
-      const token = localStorage.getItem("sentinelix_token");
+      const token = localStorage.getItem("sentinelx_token");
       const resp = await fetch(url, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
@@ -92,13 +101,54 @@ export default function ReportsPage() {
       const href = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = href;
-      a.download = `SentinelIX_CVE_Report_${end}.${fmt}`;
+      a.download = `SentinelX_CVE_Report_${end}.${fmt}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(href);
     } catch (e: any) {
       setError(e?.message || "Export failed");
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  /**
+   * The PDF is generated entirely client-side using the brand-strict
+   * jsPDF renderer in `utils/generateReport.ts`. Doing this on the
+   * frontend means the generated PDF stays pixel-identical to the
+   * mock-up regardless of the backend's reportlab version.
+   */
+  const downloadBrandedPdf = () => {
+    if (!report) return;
+    setExporting("pdf");
+    try {
+      const recs = report.recommendations && report.recommendations.length
+        ? report.recommendations
+        : report.key_observations;
+      generateSentinelXReport({
+        brief:
+          (report as any).brief ||
+          report.results_brief ||
+          "No analyst brief was generated for this report window.",
+        recommendation: recs.length ? recs : ["No outstanding recommendations."],
+        severity: {
+          low: report.summary.low_count || 0,
+          medium: report.summary.medium_count || 0,
+          high: report.summary.high_count || 0,
+          critical: report.summary.critical_count || 0,
+        },
+        meta: {
+          organisation: report.summary.profile_name,
+          asset: report.summary.asset_name || undefined,
+          startDate: report.summary.start_date,
+          endDate: report.summary.end_date,
+          generatedAt: report.summary.generated_at,
+        },
+        filename: `SentinelX_Intelligence_Report_${end}.pdf`,
+      });
+    } catch (e: any) {
+      setError(e?.message || "PDF generation failed");
     } finally {
       setExporting(null);
     }
@@ -166,42 +216,30 @@ export default function ReportsPage() {
 
         <div className="flex flex-wrap items-end justify-between gap-3 border-t border-sentinel-border pt-4">
           <div>
-            <label className="label">Report type</label>
-            <div className="flex gap-2">
-              {(["executive", "technical"] as const).map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setReportType(t)}
-                  className={`rounded-lg border px-4 py-2 text-sm font-semibold capitalize transition ${
-                    reportType === t
-                      ? "border-sentinel-navy bg-sentinel-navy text-white"
-                      : "border-sentinel-border bg-white text-sentinel-ink hover:bg-sentinel-subtle"
-                  }`}
-                >
-                  {t}
-                </button>
-              ))}
+            <label className="label">Report</label>
+            <div className="rounded-lg border border-sentinel-navy bg-sentinel-navy px-4 py-2 text-sm font-semibold uppercase tracking-wider text-white">
+              Executive Intelligence Report
             </div>
           </div>
           <div className="flex items-end gap-2">
             <button
               className="btn-secondary"
-              onClick={() => download("csv")}
+              onClick={() => downloadServerExport("csv")}
               disabled={!profileId || exporting === "csv"}
             >
               {exporting === "csv" ? "Exporting…" : "CSV"}
             </button>
             <button
               className="btn-secondary"
-              onClick={() => download("xlsx")}
+              onClick={() => downloadServerExport("xlsx")}
               disabled={!profileId || exporting === "xlsx"}
             >
               {exporting === "xlsx" ? "Exporting…" : "Excel"}
             </button>
             <button
               className="btn-gold"
-              onClick={() => download("pdf")}
-              disabled={!profileId || exporting === "pdf"}
+              onClick={downloadBrandedPdf}
+              disabled={!profileId || !report || exporting === "pdf"}
             >
               {exporting === "pdf" ? "Generating…" : "Download PDF"}
             </button>
