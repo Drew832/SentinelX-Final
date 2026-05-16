@@ -1,8 +1,30 @@
-"""Authentication routes: register, verify email (OTP), login, profile, password change."""
+"""Authentication routes: register, verify email (OTP), login, profile, password change.
+
+OTP flow hardening
+------------------
+The OTP verification endpoint historically reported "Verification Failed"
+even when the user pasted the correct code. Two real-world issues caused
+that:
+
+  1. Users (and some mail clients) inject zero-width characters, NBSPs, or
+     surrounding whitespace when copy-pasting from the email body. The
+     submitted string then no longer matched the bcrypt-hashed code.
+  2. Email clients sometimes render the OTP with formatting that introduces
+     unicode digits (e.g. fullwidth '１') that fail a literal byte
+     comparison.
+
+We now normalise the submitted code aggressively (strip whitespace and
+non-digit codepoints, NFKC-normalise unicode, lowercase the email lookup)
+before bcrypt verification, and we treat any digit-only token of the
+expected length as the candidate even if the user accidentally appended a
+period or other punctuation.
+"""
 from __future__ import annotations
 
 import logging
+import re
 import secrets
+import unicodedata
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
@@ -30,11 +52,31 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 OTP_EXPIRY_MINUTES = 15
+OTP_LENGTH = 6
+_DIGIT_RE = re.compile(r"\D+")
 
 
 def _generate_otp() -> str:
-    """Generate a 6-digit OTP string."""
-    return f"{secrets.randbelow(900000) + 100000}"
+    """Generate a zero-padded numeric OTP of `OTP_LENGTH` digits."""
+    return f"{secrets.randbelow(10 ** OTP_LENGTH):0{OTP_LENGTH}d}"
+
+
+def _normalise_email(value: str) -> str:
+    return value.strip().lower()
+
+
+def _normalise_otp(value: str) -> str:
+    """Coerce the user's input into a digits-only string.
+
+    This is the single source of truth for OTP normalisation so the
+    register, verify, and resend handlers all behave identically and the
+    bcrypt verification never sees stray whitespace, NBSP characters, or
+    fullwidth digits pasted from rich-text email clients.
+    """
+    if not value:
+        return ""
+    nfkc = unicodedata.normalize("NFKC", value)
+    return _DIGIT_RE.sub("", nfkc).strip()
 
 
 def _issue_token(user: User) -> Token:
@@ -48,8 +90,9 @@ async def register(
     background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> RegisterPending:
+    email = _normalise_email(str(payload.email))
     existing = await db.execute(
-        select(User).where(or_(User.email == payload.email, User.username == payload.username))
+        select(User).where(or_(User.email == email, User.username == payload.username))
     )
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="User with email or username already exists")
@@ -58,7 +101,7 @@ async def register(
     hashed_code = hash_password(code)
 
     user = User(
-        email=str(payload.email),
+        email=email,
         username=payload.username,
         hashed_password=hash_password(payload.password),
         role=UserRole.USER,
@@ -70,7 +113,8 @@ async def register(
     await db.commit()
     await db.refresh(user)
 
-    logger.info("Registered user %s (%s), OTP generated", user.username, user.email)
+    logger.info("Registered user %s (%s); OTP issued (expires in %d min)",
+                user.username, user.email, OTP_EXPIRY_MINUTES)
 
     async def _send():
         try:
@@ -85,17 +129,25 @@ async def register(
 
 @router.post("/verify-email", response_model=Token)
 async def verify_email(payload: VerifyEmailRequest, db: AsyncSession = Depends(get_db)) -> Token:
-    submitted_code = payload.code.strip()
+    submitted_code = _normalise_otp(payload.code)
+    email = _normalise_email(str(payload.email))
     logger.info(
-        "Verifying email for %s with code '%s' (len=%d)",
-        payload.email, submitted_code, len(submitted_code),
+        "Verifying email for %s (normalised code length=%d)",
+        email, len(submitted_code),
     )
 
-    result = await db.execute(select(User).where(User.email == str(payload.email)))
+    if not submitted_code or len(submitted_code) != OTP_LENGTH:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Verification code must be {OTP_LENGTH} digits.",
+        )
+
+    result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
     if not user:
-        logger.warning("Verification attempt for non-existent email: %s", payload.email)
-        raise HTTPException(status_code=400, detail="Invalid verification request")
+        logger.warning("Verification attempt for non-existent email: %s", email)
+        # Avoid leaking which emails are registered.
+        raise HTTPException(status_code=400, detail="Invalid verification code — please check and try again")
 
     if user.is_active:
         logger.info("User %s is already active", user.email)
@@ -103,7 +155,10 @@ async def verify_email(payload: VerifyEmailRequest, db: AsyncSession = Depends(g
 
     if not user.otp_hashed:
         logger.warning("No OTP hash stored for user %s", user.email)
-        raise HTTPException(status_code=400, detail="No verification code on file — request a new code")
+        raise HTTPException(
+            status_code=400,
+            detail="No verification code on file — request a new code",
+        )
 
     if user.otp_expires_at:
         expiry = user.otp_expires_at
@@ -117,10 +172,7 @@ async def verify_email(payload: VerifyEmailRequest, db: AsyncSession = Depends(g
             )
 
     if not verify_password(submitted_code, user.otp_hashed):
-        logger.warning(
-            "OTP mismatch for user %s (submitted '%s', hash prefix '%s')",
-            user.email, submitted_code, user.otp_hashed[:20],
-        )
+        logger.warning("OTP mismatch for user %s", user.email)
         raise HTTPException(status_code=400, detail="Invalid verification code — please check and try again")
 
     user.is_active = True
@@ -139,11 +191,13 @@ async def resend_otp(
     background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> RegisterPending:
-    result = await db.execute(select(User).where(User.email == str(payload.email)))
+    email = _normalise_email(str(payload.email))
+    result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
     if not user or user.is_active:
+        # Don't disclose whether the address is on file.
         return RegisterPending(
-            email=payload.email,
+            email=email,
             detail="If an account exists for this email, a new code has been sent.",
         )
 
@@ -173,8 +227,11 @@ async def login(
     form: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db),
 ) -> Token:
+    identifier = form.username.strip()
     result = await db.execute(
-        select(User).where(or_(User.email == form.username, User.username == form.username))
+        select(User).where(
+            or_(User.email == identifier.lower(), User.username == identifier)
+        )
     )
     user = result.scalar_one_or_none()
     if not user or not verify_password(form.password, user.hashed_password):
