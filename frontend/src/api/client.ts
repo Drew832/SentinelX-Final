@@ -13,7 +13,7 @@ export const setOnUnauthorized = (cb: () => void) => {
 };
 
 apiClient.interceptors.request.use((config) => {
-  const token = localStorage.getItem("sentinelix_token");
+  const token = localStorage.getItem("sentinelx_token");
   if (token) {
     config.headers = config.headers ?? {};
     (config.headers as Record<string, string>).Authorization = `Bearer ${token}`;

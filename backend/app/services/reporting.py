@@ -680,7 +680,7 @@ def _exec_header_footer(canvas, doc, report_date: str):
     canvas.setFont("Helvetica", 7.5)
     canvas.setFillColor(navy)
     canvas.drawString(doc.leftMargin, h - 0.45 * inch,
-                      "SentinelIX \u2013 Intelligence Report")
+                      "SentinelX \u2013 Intelligence Report")
     canvas.setFillColor(subtle)
     canvas.drawRightString(w - doc.rightMargin, h - 0.45 * inch, report_date)
     canvas.setStrokeColor(gold)
@@ -866,7 +866,7 @@ def _report_pdf_bytes(report: dict[str, Any]) -> bytes:
     flow.append(gold_rule_wrapper)
     flow.append(Spacer(1, 22))
 
-    analyst = s.get("generated_by", "SentinelIX System")
+    analyst = s.get("generated_by", "SentinelX System")
     asset_display = s.get("asset_name") or "\u2014"
     meta_lines = (
         f"<b>Organization:</b> {s['profile_name']}<br/>"
@@ -1212,7 +1212,7 @@ def _tech_header_footer(canvas, doc, report_date: str):
     canvas.setFont("Helvetica", 7.5)
     canvas.setFillColor(navy)
     canvas.drawString(doc.leftMargin, h - 0.38 * inch,
-                      "SentinelIX \u2013 Technical Report")
+                      "SentinelX \u2013 Technical Report")
     canvas.setFillColor(subtle)
     canvas.drawRightString(w - doc.rightMargin, h - 0.38 * inch, report_date)
     canvas.setStrokeColor(gold)
@@ -1359,7 +1359,7 @@ def _technical_pdf_bytes(report: dict[str, Any]) -> bytes:
     flow.append(gold_rule_wrap)
     flow.append(Spacer(1, 18))
 
-    analyst = s.get("generated_by", "SentinelIX System")
+    analyst = s.get("generated_by", "SentinelX System")
     asset_display = s.get("asset_name") or "\u2014"
     meta_lines = (
         f"<b>Organization:</b> {s['profile_name']}<br/>"
@@ -1576,7 +1576,7 @@ def export_report_bytes(
     """Return (payload, media_type, filename) for the requested format/type."""
     fmt = (fmt or "csv").lower()
     stamp = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
-    base = f"SentinelIX_CVE_Report_{stamp}"
+    base = f"SentinelX_CVE_Report_{stamp}"
 
     is_technical = report_type == "technical"
     if fmt in {"xlsx", "excel"}:

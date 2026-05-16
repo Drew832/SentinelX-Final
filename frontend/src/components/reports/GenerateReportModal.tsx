@@ -4,14 +4,21 @@ import { motion } from "framer-motion";
 import clsx from "clsx";
 import { profileApi, reportsApi } from "@/api/endpoints";
 import type { OrgProfile } from "@/types";
+import { generateSentinelXReport } from "@/utils/generateReport";
 
 type Format = "pdf" | "xlsx" | "csv";
-type ReportType = "executive" | "technical";
 
 function isoDay(d: Date) {
   return d.toISOString().slice(0, 10);
 }
 
+/**
+ * "Generate report" quick-action modal.
+ *
+ * Only the executive Intelligence Report is exposed — technical PDFs were
+ * retired in v3. PDF exports are rendered client-side via the brand
+ * generator so they exactly match the approved template.
+ */
 export default function GenerateReportModal({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
   const [profiles, setProfiles] = useState<OrgProfile[]>([]);
@@ -19,7 +26,6 @@ export default function GenerateReportModal({ onClose }: { onClose: () => void }
   const [start, setStart] = useState(isoDay(new Date(Date.now() - 30 * 86400000)));
   const [end, setEnd] = useState(isoDay(new Date()));
   const [format, setFormat] = useState<Format>("pdf");
-  const [reportType, setReportType] = useState<ReportType>("executive");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,28 +47,57 @@ export default function GenerateReportModal({ onClose }: { onClose: () => void }
     if (!profileId) return;
     setBusy(true);
     try {
-      const url = reportsApi.downloadUrl({
-        profile_id: profileId,
-        start_date: start,
-        end_date: end,
-        report_type: reportType,
-        format,
-      });
-      const token = localStorage.getItem("sentinelix_token");
-      const resp = await fetch(url, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      if (!resp.ok) throw new Error(`Export failed (${resp.status})`);
-      const blob = await resp.blob();
-      const href = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = href;
-      const ext = format === "xlsx" ? "xlsx" : format;
-      a.download = `SentinelIX_CVE_Report_${end}.${ext}`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(href);
+      if (format === "pdf") {
+        // Branded client-side render.
+        const data = await reportsApi.executive(profileId, start, end);
+        const recs = (data as any).recommendations?.length
+          ? (data as any).recommendations
+          : data.key_observations || [];
+        generateSentinelXReport({
+          brief:
+            (data as any).brief ||
+            data.results_brief ||
+            "No analyst brief was generated for this report window.",
+          recommendation: recs.length ? recs : ["No outstanding recommendations."],
+          severity: {
+            low: data.summary.low_count || 0,
+            medium: data.summary.medium_count || 0,
+            high: data.summary.high_count || 0,
+            critical: data.summary.critical_count || 0,
+          },
+          meta: {
+            organisation: data.summary.profile_name,
+            asset: data.summary.asset_name || undefined,
+            startDate: data.summary.start_date,
+            endDate: data.summary.end_date,
+            generatedAt: data.summary.generated_at,
+          },
+          filename: `SentinelX_Intelligence_Report_${end}.pdf`,
+        });
+      } else {
+        const url = reportsApi.downloadUrl({
+          profile_id: profileId,
+          start_date: start,
+          end_date: end,
+          report_type: "executive",
+          format,
+        });
+        const token = localStorage.getItem("sentinelx_token");
+        const resp = await fetch(url, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (!resp.ok) throw new Error(`Export failed (${resp.status})`);
+        const blob = await resp.blob();
+        const href = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = href;
+        const ext = format === "xlsx" ? "xlsx" : format;
+        a.download = `SentinelX_CVE_Report_${end}.${ext}`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(href);
+      }
     } catch (e: any) {
       setError(e?.message || "Export failed");
     } finally {
@@ -72,9 +107,7 @@ export default function GenerateReportModal({ onClose }: { onClose: () => void }
 
   const viewReport = () => {
     if (!profileId) return;
-    navigate(
-      `/reports?profile_id=${profileId}&start_date=${start}&end_date=${end}&report_type=${reportType}`,
-    );
+    navigate(`/reports?profile_id=${profileId}&start_date=${start}&end_date=${end}`);
     onClose();
   };
 
@@ -89,12 +122,9 @@ export default function GenerateReportModal({ onClose }: { onClose: () => void }
         className="panel w-full max-w-lg p-6"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="text-xl font-black text-sentinel-navyDark">
-          Generate Report
-        </h3>
+        <h3 className="text-xl font-black text-sentinel-navyDark">Generate Report</h3>
         <p className="mt-1 text-sm text-slate-500">
-          Export executive briefings or full technical drill-downs, scoped to a profile and date
-          range.
+          Export the SentinelX Executive Intelligence Report scoped to a profile and date range.
         </p>
 
         {loading ? (
@@ -118,26 +148,6 @@ export default function GenerateReportModal({ onClose }: { onClose: () => void }
                   </option>
                 ))}
               </select>
-            </div>
-
-            <div>
-              <label className="label">Report type</label>
-              <div className="flex gap-2">
-                {(["executive", "technical"] as const).map((t) => (
-                  <button
-                    key={t}
-                    onClick={() => setReportType(t)}
-                    className={clsx(
-                      "flex-1 rounded-lg border px-3 py-2 text-sm font-semibold uppercase transition",
-                      reportType === t
-                        ? "border-sentinel-navy bg-sentinel-navy text-white"
-                        : "border-sentinel-border bg-white text-sentinel-ink hover:bg-sentinel-subtle",
-                    )}
-                  >
-                    {t}
-                  </button>
-                ))}
-              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -190,7 +200,9 @@ export default function GenerateReportModal({ onClose }: { onClose: () => void }
         )}
 
         <div className="mt-6 flex flex-wrap justify-end gap-2">
-          <button className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn-secondary" onClick={onClose}>
+            Cancel
+          </button>
           {profiles.length > 0 && (
             <>
               <button className="btn-secondary" onClick={viewReport} disabled={busy || !profileId}>

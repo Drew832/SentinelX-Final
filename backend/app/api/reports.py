@@ -70,6 +70,13 @@ async def technical_report(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> dict:
+    """Legacy endpoint.
+
+    The dedicated technical PDF report was retired in v3 — every consumer
+    has been migrated to the unified Executive Intelligence Report. We
+    keep the JSON payload available for any automation that still polls
+    this URL, but the response no longer drives a separate UI surface.
+    """
     profile = await _get_profile(db, profile_id)
     start, end = _resolve_window(start_date, end_date)
     report = await generate_technical_report(db, profile, start, end)

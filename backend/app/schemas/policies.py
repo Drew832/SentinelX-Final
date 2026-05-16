@@ -10,7 +10,7 @@ class PolicyRecommendRequest(BaseModel):
     profile_id: int = Field(ge=1)
     cve_id: str = Field(min_length=8, max_length=32)
     policy_type: str = Field(
-        description="One of the supported SentinelIX policy focus areas.",
+        description="One of the supported SentinelX policy focus areas.",
     )
 
     @field_validator("policy_type")

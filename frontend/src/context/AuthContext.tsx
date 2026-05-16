@@ -27,9 +27,9 @@ interface AuthState {
 
 const AuthContext = createContext<AuthState | undefined>(undefined);
 
-const TOKEN_KEY = "sentinelix_token";
-const USER_KEY = "sentinelix_user";
-const GUEST_KEY = "sentinelix_guest";
+const TOKEN_KEY = "sentinelx_token";
+const USER_KEY = "sentinelx_user";
+const GUEST_KEY = "sentinelx_guest";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(null);

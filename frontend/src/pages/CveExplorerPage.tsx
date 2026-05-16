@@ -110,7 +110,7 @@ export default function CveExplorerPage() {
 
   const downloadExport = async (format: "csv" | "xlsx") => {
     const href = exportHref(format);
-    const token = localStorage.getItem("sentinelix_token");
+    const token = localStorage.getItem("sentinelx_token");
     const resp = await fetch(href, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });

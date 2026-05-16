@@ -16,7 +16,6 @@ const SECTIONS: { title: string; items: { to: string; label: string; icon: strin
     title: "Intelligence",
     items: [
       { to: "/threat-map", label: "Threat Map", icon: "◎" },
-      { to: "/attack-surface", label: "Attack Surface", icon: "⊙" },
       { to: "/news", label: "News Feed", icon: "✦" },
     ],
   },
@@ -28,7 +27,6 @@ const SECTIONS: { title: string; items: { to: string; label: string; icon: strin
       { to: "/compliance", label: "Compliance Radar", icon: "⎈" },
       { to: "/policies", label: "Policy Recs", icon: "⎆" },
       { to: "/reports", label: "Reports", icon: "⎙" },
-      { to: "/account", label: "Account", icon: "⚙" },
     ],
   },
   {
@@ -91,7 +89,7 @@ export default function AppShell() {
           <Outlet />
         </main>
         <footer className="border-t border-sentinel-border bg-white px-8 py-3 text-right text-[11px] text-slate-500">
-          SentinelIX · NVD + CISA KEV + Shodan + News correlation
+          SentinelX · NVD + CISA KEV + Shodan + News correlation
         </footer>
       </div>
     </div>

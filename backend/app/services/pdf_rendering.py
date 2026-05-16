@@ -68,7 +68,7 @@ async def render_report_pdf(
             if auth_token:
                 # The SPA uses localStorage to attach auth headers via the API client.
                 await context.add_init_script(
-                    f"window.localStorage.setItem('sentinelix_token', {auth_token!r});"
+                    f"window.localStorage.setItem('sentinelx_token', {auth_token!r});"
                 )
             page = await context.new_page()
             await page.goto(url, wait_until="networkidle", timeout=120_000)

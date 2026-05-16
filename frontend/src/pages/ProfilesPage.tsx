@@ -115,7 +115,7 @@ export default function ProfilesPage() {
   const exportCsv = async (p: OrgProfile) => {
     setActionMessage(null);
     try {
-      const token = localStorage.getItem("sentinelix_token");
+      const token = localStorage.getItem("sentinelx_token");
       const resp = await fetch(profileApi.exportUrl(p.id), {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
