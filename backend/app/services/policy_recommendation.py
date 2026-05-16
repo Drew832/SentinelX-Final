@@ -3,14 +3,31 @@
 Maps a collection of CVEs to the information-security policies an organisation
 should strengthen or adopt. Uses CWE identifiers, CVE description keywords, and
 affected product vendors as classification signals.
+
+Optional AI verification
+------------------------
+``validate_with_ai(recommendations, cves)`` is an optional second pass
+that asks Claude (or the OpenAI fallback) to review the deterministic
+classifier's output via :mod:`app.services.ai_gateway`. The model
+returns a refined justification for every recommendation that
+explicitly cites the contributing CVE evidence. When the LLM disagrees
+with the rule's mapping it can downgrade the priority or mark it
+incorrect, which we then drop. The deterministic output is always
+returned untouched if the validation pass fails for any reason — the
+engine is fail-safe, never fail-loud.
 """
 from __future__ import annotations
 
+import json
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Iterable
 
 from app.models.cve import CVE
+from app.services.ai_gateway import active_model, ai_complete, has_provider
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------
 # Rule definitions
@@ -425,6 +442,12 @@ def _ai_payload(
     recommendations: list[Recommendation],
     cve_index: dict[str, CVE],
 ) -> dict:
+    """Build the compact JSON payload the auditor model sees.
+
+    We trim every text field aggressively so the prompt fits in a single
+    Claude turn even for large recommendation sets — that's what keeps
+    the /policies/recommend endpoint snappy when `ai_validate=true`.
+    """
     payload: list[dict] = []
     for rec in recommendations:
         evidence_blob: list[dict] = []
@@ -453,30 +476,6 @@ def _ai_payload(
     return {"recommendations": payload}
 
 
-async def _call_anthropic(system: str, user: str) -> str:
-    if not settings.anthropic_api_key:
-        raise RuntimeError("anthropic key missing")
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        resp = await client.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": settings.anthropic_api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": settings.anthropic_model,
-                "max_tokens": 1500,
-                "system": system,
-                "messages": [{"role": "user", "content": user}],
-            },
-        )
-        resp.raise_for_status()
-        data = resp.json()
-    parts = data.get("content", [])
-    return "".join(p.get("text", "") for p in parts if p.get("type") == "text").strip()
-
-
 async def validate_with_ai(
     recommendations: list[Recommendation],
     cves: Iterable[CVE],
@@ -486,25 +485,42 @@ async def validate_with_ai(
     Returns the (possibly reordered) list of Recommendations plus a marker
     string indicating which model was used so callers can surface it in
     the UI for transparency. The deterministic output is returned
-    untouched if no LLM is configured or the API call fails.
+    untouched if no LLM is configured or the API call fails — this
+    routine is fail-safe by design and never raises.
     """
     if not recommendations:
         return recommendations, "none"
-    if not settings.anthropic_api_key:
+    if not has_provider():
         return recommendations, "rules-only"
 
     cve_index: dict[str, CVE] = {c.cve_id: c for c in cves}
     payload = _ai_payload(recommendations, cve_index)
 
-    try:
-        raw = await _call_anthropic(_AI_SYSTEM, json.dumps(payload))
-        parsed = json.loads(raw)
-        reviews = parsed.get("reviews") or []
-    except (httpx.HTTPError, ValueError, KeyError) as exc:
-        logger.warning("Policy AI validation failed; using deterministic output: %s", exc)
+    result = await ai_complete(
+        system=_AI_SYSTEM,
+        user=json.dumps(payload),
+        max_tokens=1500,
+        temperature=0.2,
+        timeout=30.0,
+        cache_ttl=240,
+        label="policy_validate",
+    )
+    if not result.ok:
+        logger.info("Policy AI validation unavailable (%s); using rules", result.error)
         return recommendations, "rules-only"
 
-    by_name = {r["policy_name"]: r for r in reviews if isinstance(r, dict) and r.get("policy_name")}
+    try:
+        parsed = json.loads(result.text)
+        reviews = parsed.get("reviews") or []
+    except (json.JSONDecodeError, AttributeError) as exc:
+        logger.warning("Policy AI validation parse failed (%s); using rules", exc)
+        return recommendations, "rules-only"
+
+    by_name = {
+        r["policy_name"]: r
+        for r in reviews
+        if isinstance(r, dict) and r.get("policy_name")
+    }
     refined: list[Recommendation] = []
     for rec in recommendations:
         review = by_name.get(rec.policy_name)
@@ -513,7 +529,7 @@ async def validate_with_ai(
             continue
         verdict = (review.get("verdict") or "").lower()
         if verdict == "incorrect":
-            # Drop the recommendation entirely when Claude says the mapping is wrong.
+            # Drop the recommendation entirely when the LLM says it's wrong.
             continue
         new_priority = (review.get("priority") or rec.priority).upper()
         if new_priority not in {"HIGH", "MEDIUM", "LOW"}:
@@ -525,4 +541,4 @@ async def validate_with_ai(
 
     priority_rank = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
     refined.sort(key=lambda r: (priority_rank[r.priority], -r.matched_cves))
-    return refined, settings.anthropic_model
+    return refined, active_model()

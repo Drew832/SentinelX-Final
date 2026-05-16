@@ -437,71 +437,27 @@ async def _structured_answer(
     )
 
 
-async def _call_anthropic(message: str, context: List[Dict[str, Any]], history: List[Dict[str, str]]) -> str:
-    if not settings.anthropic_api_key:
-        raise RuntimeError("anthropic key missing")
-
-    context_text = "\n\n".join(
-        f"- {c['cve_id']} (CVSS {c.get('cvss_v3_score')} {c.get('cvss_v3_severity')}, KEV={c.get('is_kev')}): {c.get('description', '')}"
+def _render_context(context: List[Dict[str, Any]]) -> str:
+    if not context:
+        return "No matching CVEs in local database."
+    return "\n\n".join(
+        f"- {c['cve_id']} "
+        f"(CVSS {c.get('cvss_v3_score')} {c.get('cvss_v3_severity')}, "
+        f"KEV={c.get('is_kev')}): {c.get('description', '')}"
         for c in context
-    ) or "No matching CVEs in local database."
-
-    messages = list(history)
-    messages.append({"role": "user", "content": message})
-
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        resp = await client.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": settings.anthropic_api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": settings.anthropic_model,
-                "max_tokens": 1024,
-                "system": f"{SYSTEM_PROMPT}\n\nLocal CVE context:\n{context_text}",
-                "messages": messages,
-            },
-        )
-        resp.raise_for_status()
-        data = resp.json()
-    parts = data.get("content", [])
-    return "".join(p.get("text", "") for p in parts if p.get("type") == "text").strip()
+    )
 
 
-async def _call_openai(message: str, context: List[Dict[str, Any]], history: List[Dict[str, str]]) -> str:
-    if not settings.openai_api_key:
-        raise RuntimeError("openai key missing")
-
-    context_text = "\n\n".join(
-        f"- {c['cve_id']} (CVSS {c.get('cvss_v3_score')} {c.get('cvss_v3_severity')}, KEV={c.get('is_kev')}): {c.get('description', '')}"
-        for c in context
-    ) or "No matching CVEs in local database."
-
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "system", "content": f"Local CVE context:\n{context_text}"},
-    ]
-    messages.extend(history)
-    messages.append({"role": "user", "content": message})
-
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        resp = await client.post(
-            f"{settings.openai_base_url.rstrip('/')}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {settings.openai_api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": settings.openai_model,
-                "messages": messages,
-                "temperature": 0.2,
-            },
-        )
-        resp.raise_for_status()
-        data = resp.json()
-    return data["choices"][0]["message"]["content"].strip()
+def _render_history_as_user(message: str, history: List[Dict[str, str]]) -> str:
+    """Flatten history into a single user prompt so it survives the gateway cache."""
+    if not history:
+        return message
+    chunks: list[str] = []
+    for m in history[-6:]:
+        role = m.get("role", "user").upper()
+        chunks.append(f"[{role}] {m.get('content', '')}")
+    chunks.append(f"[USER] {message}")
+    return "\n".join(chunks)
 
 
 async def answer_question(db: AsyncSession, payload: ChatRequest) -> ChatResponse:
@@ -513,14 +469,21 @@ async def answer_question(db: AsyncSession, payload: ChatRequest) -> ChatRespons
     ][-8:]
 
     answer = local_answer
-    try:
-        if settings.anthropic_api_key:
-            answer = await _call_anthropic(payload.message, context, history)
-        elif settings.openai_api_key:
-            answer = await _call_openai(payload.message, context, history)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("LLM call failed, using local answer: %s", exc)
-        answer = local_answer
+    if has_provider():
+        context_text = _render_context(context)
+        result = await ai_complete(
+            system=f"{SYSTEM_PROMPT}\n\nLocal CVE context:\n{context_text}",
+            user=_render_history_as_user(payload.message, history),
+            max_tokens=1024,
+            temperature=0.2,
+            timeout=30.0,
+            cache_ttl=60,  # short — chat is exploratory, fresh answers preferred
+            label=f"assistant:{intent}",
+        )
+        if result.ok and result.text:
+            answer = result.text
+        else:
+            logger.info("Assistant LLM unavailable (%s); using local answer", result.error)
 
     referenced = [c["cve_id"] for c in context if c.get("cve_id")]
     return ChatResponse(

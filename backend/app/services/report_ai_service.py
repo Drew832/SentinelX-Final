@@ -135,29 +135,30 @@ async def generate_report_narrative(
         },
     }
 
+    result = await ai_complete(
+        system=system,
+        user=json.dumps(user),
+        max_tokens=1100,
+        temperature=0.2,
+        # Generous timeout — narratives can take 20–40s on Claude — but
+        # always bounded so the report endpoint never hangs forever.
+        timeout=45.0,
+        cache_ttl=180,
+        label="report_narrative",
+    )
+    if not result.ok:
+        logger.info("Report narrative AI unavailable (%s); using local fallback", result.error)
+        return _fallback(exec_mode=exec_mode, ctx=ctx)
+
     try:
-        raw: Optional[str] = None
-        model = "local-fallback"
-        if settings.anthropic_api_key:
-            raw = await _call_anthropic(system, str(user))
-            model = settings.anthropic_model
-        elif settings.openai_api_key:
-            raw = await _call_openai(system, str(user))
-            model = settings.openai_model
-        else:
-            raise RuntimeError("no llm configured")
-
-        import json
-
-        parsed = json.loads(raw)
+        parsed = json.loads(result.text)
         brief = str(parsed.get("brief") or "").strip()
         recs = parsed.get("recommendations") or []
         recs = [str(r).strip() for r in recs if str(r).strip()]
         if not brief or not recs:
             raise ValueError("LLM returned empty narrative")
-        return brief, recs[:10], model
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Report narrative generation failed, using fallback: %s", exc)
-        brief, recs, model = _fallback(exec_mode=exec_mode, ctx=ctx)
-        return brief, recs, model
+        return brief, recs[:10], result.model
+    except (json.JSONDecodeError, ValueError) as exc:
+        logger.warning("Report narrative parse failed (%s); using local fallback", exc)
+        return _fallback(exec_mode=exec_mode, ctx=ctx)
 
